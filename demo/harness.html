@@ -1,0 +1,31 @@
+<!doctype html><meta charset=utf-8><title>MetalHDR harness</title>
+<style>html,body{margin:0;background:#0b0b0d;height:100%;display:grid;place-items:center}video{width:960px;height:540px;background:#000}</style>
+<video src="test.mp4" autoplay loop muted playsinline></video>
+<script src="../dist/metalhdr.user.js"></script>
+<script>
+  const log = [];
+  const snap = (tag) => {
+    const v = document.querySelector("video");
+    const c = document.querySelector("canvas.metalhdr-canvas");
+    const ctrl = globalThis.MetalHDR?.app?.state?.controller;
+    log.push({
+      tag,
+      attr: document.documentElement.dataset.metalhdr || "none",
+      v: v ? { paused: v.paused, rs: v.readyState, t: +v.currentTime.toFixed(2), w: v.videoWidth, h: v.videoHeight, op: getComputedStyle(v).opacity } : null,
+      canvas: c ? [c.width, c.height] : null,
+      ctrl: ctrl ? { active: ctrl.active, renderer: ctrl.renderer?.name, skip: ctrl.skipReason } : null
+    });
+  };
+  setTimeout(() => {
+    snap("t2");
+    snap("t4");
+    const payload = {
+      ua: navigator.userAgent.slice(0, 110),
+      dynamicRange: matchMedia("(dynamic-range: high)").matches ? "high" : "standard",
+      hasGPU: !!navigator.gpu,
+      hasMetalHDR: !!globalThis.MetalHDR,
+      log
+    };
+    fetch("/report?d=" + encodeURIComponent(JSON.stringify(payload)));
+  }, 4000);
+</script>

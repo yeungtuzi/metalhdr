@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "MetalHDR",
+  "version": "0.1.0",
+  "description": "SDR 视频实时转 HDR：自动读取屏幕亮度上限，软肩滚降不裁切。",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAxjx7WHAa2HiuGohF/xY9Ui/LdDj8xAFdqOGWMg/soh6+GC7Jeo45wsBKy+5ksQcAV1qWWMxZdGNEEyZ9zmDjskjud/GR19SzkZm+H8A8BdfFiEqB2hdJbXZFXCmOdD4dImQN9myekAlEghdDVsxweaSwW391O3M1wRzFyEzUbCaOzSphzrZJmoSeLcXpYjfnkL56wj4E74fzs6C0eTw5L0JRpGaJ72P+nhxyFDBJfkENiVrEiocT4A2wChacEJw/OdWBDTQvLTVwt7P0FT96sNYwk/jAW5o7WxzZeKAwl4C5KA00/u1vxEEt/4F9U9haFoxesIWDTH9X0KE0yq4iHwIDAQAB",
+  "minimum_chrome_version": "129",
+  "icons": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" },
+  "permissions": ["storage", "nativeMessaging"],
+  "host_permissions": ["*://*/*"],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_title": "MetalHDR",
+    "default_popup": "popup/popup.html",
+    "default_icon": { "16": "icons/icon-16.png", "32": "icons/icon-32.png", "48": "icons/icon-48.png", "128": "icons/icon-128.png" }
+  },
+  "content_scripts": [{
+    "matches": ["*://*/*"],
+    "js": ["shared/core.js", "src/shaders.js", "src/renderers.js", "src/site.js", "src/content.js"],
+    "css": ["src/content.css"],
+    "all_frames": true,
+    "run_at": "document_idle"
+  }]
+}

@@ -1,0 +1,45 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: 构建两个 build
+        run: node scripts/build.mjs
+      - name: 软肩曲线性质测试
+        run: node tests/tone.test.mjs
+      - uses: actions/upload-artifact@v4
+        with:
+          name: metalhdr-builds
+          path: |
+            dist/metalhdr.user.js
+            dist/metalhdr-extension-*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - run: node scripts/build.mjs
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/metalhdr.user.js
+            dist/metalhdr-extension-*.zip

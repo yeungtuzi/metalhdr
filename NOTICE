@@ -1,0 +1,26 @@
+MetalHDR
+Copyright (C) 2026 metalhdr contributors
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, either version 3 of the License, or (at your option) any later
+version.
+
+本项目的部分骨架与思路来自以下项目，特此署名：
+
+1. HDR Lift — https://github.com/ZheMuxi/HDR-Lift
+   Copyright (C) 2026 ZheMuxi
+   License: GPL-3.0
+   本项目复用了其 WebExtension 结构（content script 生命周期、WebGPU/WebGL2
+   降级链、设置面板形态、图标资源），并在此基础上重写了色调映射管线。
+
+2. Headroom HDR (SDR-to-HDR-Video) — https://github.com/96dot/SDR-to-HDR-Video
+   License: MIT
+   本项目的「高画质」多 pass 逆色调映射（拷贝 → 亮度金字塔 → 主 pass、
+   局部高光检测、大面积收敛、去色带）参考了其公开实现与文档。
+
+3. MacLC — https://www.hazenstudio.com/maclc/
+   高画质管线中的「驱动能量 = max(亮度, 0.85 × 最大通道)」与「峰值按 SDR 白
+   倍数计算」取自其公开规格说明。
+
+本项目的软肩滚降曲线（C1 连续、渐近于峰值、从不裁切）为独立实现。

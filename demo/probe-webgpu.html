@@ -1,0 +1,66 @@
+<!doctype html><meta charset=utf-8><title>wgpu probe</title>
+<video src="test.mp4" autoplay loop muted playsinline style="width:320px"></video>
+<script type=module>
+const out = { ua: navigator.userAgent.slice(0, 80) };
+const f16 = (u) => {
+  const s = (u & 0x8000) >> 15, e = (u & 0x7c00) >> 10, f = u & 0x03ff;
+  if (e === 0) return (s ? -1 : 1) * Math.pow(2, -14) * (f / 1024);
+  if (e === 31) return f ? NaN : (s ? -Infinity : Infinity);
+  return (s ? -1 : 1) * Math.pow(2, e - 15) * (1 + f / 1024);
+};
+try {
+  const adapter = await navigator.gpu.requestAdapter();
+  const dev = await adapter.requestDevice();
+  const v = document.querySelector('video');
+  await v.play().catch(() => {});
+  await new Promise((r) => setTimeout(r, 1500));
+
+  out.importExternal = typeof dev.importExternalTexture === 'function';
+  out.copyExternal = typeof dev.queue.copyExternalImageToTexture === 'function';
+
+  const tex = dev.createTexture({
+    size: [64, 64, 1], format: 'rgba16float',
+    usage: GPUTextureUsage.COPY_DST | GPUTextureUsage.COPY_SRC | GPUTextureUsage.TEXTURE_BINDING | GPUTextureUsage.RENDER_ATTACHMENT
+  });
+
+  const readMean = async () => {
+    const buf = dev.createBuffer({ size: 64 * 64 * 8, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    const enc = dev.createCommandEncoder();
+    enc.copyTextureToBuffer({ texture: tex }, { buffer: buf, bytesPerRow: 512 }, [64, 64, 1]);
+    dev.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const u16 = new Uint16Array(buf.getMappedRange());
+    let sum = 0;
+    for (let i = 0; i < u16.length; i += 4) sum += f16(u16[i]) + f16(u16[i + 1]) + f16(u16[i + 2]);
+    buf.unmap();
+    return +(sum / (64 * 64 * 3)).toFixed(4);
+  };
+
+  // A: copyExternalImageToTexture(video)
+  try {
+    dev.queue.copyExternalImageToTexture({ source: v }, { texture: tex }, [64, 64, 1]);
+    out.copyFromVideo = await readMean();
+  } catch (e) { out.copyFromVideo = 'throw: ' + e.message.slice(0, 80); }
+
+  // B: 经 2D canvas 中转
+  try {
+    const c2d = document.createElement('canvas');
+    c2d.width = 64; c2d.height = 64;
+    c2d.getContext('2d').drawImage(v, 0, 0, 64, 64);
+    dev.queue.copyExternalImageToTexture({ source: c2d }, { texture: tex }, [64, 64, 1]);
+    out.copyFromCanvas = await readMean();
+  } catch (e) { out.copyFromCanvas = 'throw: ' + e.message.slice(0, 80); }
+
+  // C: importExternalTexture
+  if (out.importExternal) {
+    try {
+      const ext = dev.importExternalTexture({ source: v });
+      out.importExternalOk = !!ext;
+    } catch (e) { out.importExternalOk = 'throw: ' + e.message.slice(0, 80); }
+  }
+  out.videoState = { paused: v.paused, rs: v.readyState, w: v.videoWidth, h: v.videoHeight };
+} catch (e) {
+  out.fatal = e.message;
+}
+fetch('/report?d=' + encodeURIComponent(JSON.stringify(out)));
+</script>
