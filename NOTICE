@@ -23,4 +23,12 @@ version.
    高画质管线中的「驱动能量 = max(亮度, 0.85 × 最大通道)」与「峰值按 SDR 白
    倍数计算」取自其公开规格说明。
 
-本项目的软肩滚降曲线（C1 连续、渐近于峰值、从不裁切）为独立实现。
+4. W3C ColorWeb-CG 与 Chromium CanvasHDR — https://github.com/w3c-cg/ColorWeb-CG
+   本项目的 HDR 画布色彩语义来自其规范与 Chromium 实现：rec2100-pq / display-p3
+   预定义色彩空间、rgba16float 画布，以及 WebGPU 的 toneMapping: "extended"。
+
+5. ITU-R BT.2390 — https://www.itu.int/pub/R-REP-BT.2390
+   「软肩」滚降的色调映射思想参考其 EETF（Electro-Optical Transfer Function）。
+
+本项目的软肩滚降曲线（指数形式、膝点导数为 1、渐近封顶）为独立实现，
+未直接照搬上述项目的代码。
