@@ -62,6 +62,17 @@ bash scripts/install-app.sh     # 装到 ~/Applications 并重新注册
 
 有个人 Team 时在 Xcode 里给两个 target 选团队即可。
 
+## 支持的站点
+
+| 站点 | 行为 |
+|---|---|
+| B 站 | 处理普通投稿；按画质标签识别 HDR/杜比并跳过；番剧/影视 DRM 直接跳过 |
+| YouTube | 处理 SDR；只要有 HDR 版本就跳过（读播放器 `adaptiveFormats` 的 BT.2020 / PQ / HLG） |
+| 其他任意站点 | 通用 `<video>` 接管，按 URL 与 `hdrMetadataType` 做基本判断 |
+| Netflix / Disney+ / Prime / Apple TV+ / Max / Hulu / 爱奇艺 / 腾讯视频 / 优酷 / 芒果 / 抖音 等 | 视为 DRM，直接跳过，不尝试读帧 |
+
+YouTube 的 HDR 判断需要读播放器数据，而内容脚本运行在隔离世界读不到页面全局，所以有一个**只在 `youtube.com` 运行的 MAIN world 小脚本**（`yt-main.js`），把结论写进 `data-metalhdr-yt-hdr` 属性供主脚本读取。油猴版直接在页面世界执行，不需要这一步。
+
 ## 设置面板
 
 | 项 | 说明 |
@@ -168,7 +179,7 @@ f(x) = x                                              , x ≤ k
 ## 已知限制
 
 - **DRM 视频**（Netflix、B 站影视区部分内容）：已知问题，不做处理，检测到直接跳过、不弹提示
-- **已经是 HDR 的片源**会自动跳过；B 站按画质标签判断
+- **已经是 HDR 的片源**会自动跳过：B 站按画质标签、YouTube 按 `adaptiveFormats` 的色彩信息（保守策略：只要提供 HDR 版本就跳过，即使当前选的是 SDR 画质）
 - **站点全屏的是 `<video>` 本身**时，覆盖层不在全屏树内：会暂时交还原视频并提示，退出全屏自动恢复。
   B 站/YouTube 全屏的是播放器容器，不受影响
 - 烧录进画面的字幕、logo 会被一起抬亮

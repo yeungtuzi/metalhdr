@@ -47,10 +47,13 @@ manifest.permissions = ["storage"];
 manifest.host_permissions = ["*://*/*", "http://127.0.0.1:8765/*"];
 manifest.background = { service_worker: "background.js" };
 manifest.content_scripts = [
-  { matches: ["*://*/*"], js: ["metalhdr.js"], all_frames: true, run_at: "document_idle" }
+  { matches: ["*://*/*"], js: ["metalhdr.js"], all_frames: true, run_at: "document_idle" },
+  // 只在 YouTube：主世界读播放器数据，把 HDR 结论写进 DOM 属性
+  { matches: ["*://*.youtube.com/*"], js: ["yt-main.js"], world: "MAIN", run_at: "document_start", all_frames: false }
 ];
 writeFileSync(join(EXT, "manifest.json"), JSON.stringify(manifest, null, 2) + "\n");
 writeFileSync(join(EXT, "metalhdr.js"), bundle);
+writeFileSync(join(EXT, "yt-main.js"), readFileSync(join(ROOT, "src", "yt-main.js"), "utf8"));
 writeFileSync(
   join(EXT, "background.js"),
   `// 工具栏图标 → 切换面板；同时代理本地亮度守护进程（扩展上下文不受页面混合内容限制）

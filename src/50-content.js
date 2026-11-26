@@ -11,6 +11,7 @@
 
   const state = {
     settings: load(),
+    hdrSkip: null,
     controller: null,
     headroom: null,        // { nits, screen, potential, source }
     headroomAt: 0,
@@ -445,7 +446,22 @@
       state.controller = null;
       return;
     }
-    if (state.controller?.video === v && v.isConnected) return;
+    // 播放中切到 HDR 画质：让路，直到片源回到 SDR
+    if (state.hdrSkip === v) {
+      if (isHdrSource(v)) return;
+      state.hdrSkip = null;
+    }
+
+    if (state.controller?.video === v && v.isConnected) {
+      if (isHdrSource(v)) {
+        state.controller.destroy();
+        state.controller = null;
+        state.hdrSkip = v;
+        NS.ui?.notice("片源切换到 HDR，已暂停增强");
+      }
+      return;
+    }
+
     state.controller?.destroy();
     state.controller = new VideoController(v);
     state.controller.start();

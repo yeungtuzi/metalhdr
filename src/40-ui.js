@@ -256,7 +256,7 @@ input[type=number] {
       `<b>${st.renderer || "—"}</b> · ${st.sourceW || 0}×${st.sourceH || 0}`,
       st.active
         ? `${st.fps || 0} fps · ${st.cost || 0} ms · scale ${st.scale || 1} · 零拷贝 ${st.zeroCopy ? "开" : "关"}`
-        : `未处理${st.skipReason ? " · " + st.skipReason : ""}`,
+        : `未处理 · ${({ "already-hdr": "片源已是 HDR，已跳过", protected: "DRM 视频，已跳过", "no-renderer": "无可用渲染器" })[st.skipReason] || st.skipReason || "未接管"}`,
       `峰值 <b>${Math.round(peak)}</b> nits（${src}）`,
       st.headroom?.screen ? `屏幕 ${st.headroom.screen}` : ""
     ].filter(Boolean);
