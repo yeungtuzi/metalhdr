@@ -75,14 +75,95 @@ bash scripts/install-app.sh     # 装到 ~/Applications 并重新注册
 
 状态行会显示渲染器、分辨率、帧率、单帧耗时、当前峰值来源。
 
-## 原理
+## 算法原理
 
-- **输入**：`<video>` 帧 → `copyExternalImageToTexture` 进 `rgba16float` 纹理
-- **高画质**：3 级降采样得到「局部最大亮度 / 场景平均」，主 pass 按 MacLC 的驱动能量 `max(Y, 0.85·maxRGB)` 计算高光权重，整像素等比缩放保色相
-- **软肩**：`k = 0.85·peak`，`x ≤ k` 恒等；`x > k` 时 `k + (peak−k)(1−e^{−(x−k)/(peak−k)})`，膝点导数为 1，渐近于 peak
-- **输出**：BT.709 → Display P3，sRGB 传递函数编码，写入 `toneMapping: 'extended'` 的画布；不支持扩展的画布会软压回 SDR
+一句话：**在线性光域里只抬「亮部」，用一条 C1 连续的软肩曲线把结果收进显示器的实际峰值，全程不裁切。**
 
-峰值以「SDR 白 = 100 nits」为基准换算成倍数。
+### 1. 色彩链路
+
+```
+视频帧 (sRGB/BT.709, 8bit)
+  → 解码 sRGB 传递函数        → 线性 BT.709
+  → 逆色调映射（下面第 3 步）  → 线性，1.0 = SDR 白
+  → BT.709 → Display P3 矩阵
+  → sRGB 传递函数编码
+  → rgba16float 画布（toneMapping: extended）
+```
+
+峰值统一用「SDR 白的倍数」表示：`peak = 峰值 nits / 100`。macOS 上 EDR 的 1.0 对应约 100 nit 参考白，所以 964 nits 的屏幕就是 `peak ≈ 9.6`。
+
+### 2. 只动亮部：驱动能量
+
+逐像素算一个「有多亮」的标量，而不是直接对 RGB 三个通道分别处理——这样色相不会偏：
+
+```wgsl
+Y     = 0.2126R + 0.7152G + 0.0722B      // 亮度
+drive = max(Y, 0.85 * max(R,G,B))        // 取两者较大：纯色高光也能被识别
+```
+
+`0.85 * max(R,G,B)` 这一项来自 MacLC 的公开规格，用来避免「红色霓虹灯」这类高饱和高光因为亮度低而被漏掉。
+
+### 3. 逆色调映射增益
+
+```wgsl
+w      = smoothstep(reach, 1.0, max(drive, localMax * 0.9))  // 亮部权重
+area   = smoothstep(0.72, 1.0, localMax)                     // 是否大面积明亮
+atten  = 1 - shaping * area * 0.65                           // 大面积自动收敛
+adapt  = mix(1.0, 0.72, smoothstep(0.45, 0.92, sceneAvg))     // 亮场景少给、暗场景多给
+gain   = 1 + (peak - 1) * w * atten * adapt * strength
+lin   *= gain                                                // 整像素等比缩放，保色相
+```
+
+- `localMax` / `sceneAvg` 来自高光图：高画质是 3 级降采样金字塔（1/2 → 1/4 → 1/8，每级取邻域**最大**亮度与**平均**亮度）；零拷贝路径是单 pass 直接按 1/8 采样
+- `reach` 控制「从多暗开始抬」，越大越只动高光
+- 大面积白色（天空、白墙）用 `atten` 收敛，避免整片推爆
+
+### 4. 软肩：为什么不会裁切
+
+```wgsl
+k = 0.85 * peak
+f(x) = x                                              , x ≤ k
+     = k + (peak-k) * (1 - exp(-(x-k)/(peak-k)))      , x > k
+```
+
+性质：
+
+- **C1 连续**：`f(k) = k`，`f'(k⁻) = f'(k⁺) = 1`，没有硬膝点
+- **严格有界**：`f(x) < peak` 对任意有限 x 成立，只是渐近
+- **保色相**：先对 `max(R,G,B)` 求 `f`，再按 `f(m)/m` 等比缩放整个像素
+
+所以哪怕峰值估高了（比如系统报 10× 而实际只给 2×），也只会被显示器压暗，不会出现「一片死白」的硬裁切。
+
+### 5. 肤色保护与去色带
+
+- 肤色近似：`warmth = (R-B)/R`，只在非暗区生效，按 `protect` 比例**减少**饱和度提升，避免人脸变橙
+- 去色带：输出前加三角分布抖动（两个 hash 相减），幅度 `deband/255`，把 8 bit 源拉伸后出现的色阶抹平
+
+### 6. 两档画质
+
+| | 高（多 pass） | 低（单 pass） |
+|---|---|---|
+| 高光检测 | 3 级亮度金字塔，局部高光检测更准 | 单次 1/8 采样 / 4 抽头近似 |
+| 曲线 | 第 3 步的完整增益模型 | 全局提亮 + 高光遮罩 + 软肩 |
+| 用途 | 默认 | 4K60 或低功耗场景 |
+
+两档共用同一条软肩（第 4 步），所以**低画质也不会裁切**，只是高光的空间精度差一些。
+
+### 7. 边界
+
+逆色调映射只能**重新分配**已有的亮度，无法恢复已经在 8 bit 里被裁掉的细节。片源本身过曝的高光，只会被映射成一个有层次的亮块，而不是还原出里面的内容。
+
+## 致谢
+
+本项目的骨架、算法与色彩管线并非从零发明，主要来自这些公开工作：
+
+- **[HDR Lift](https://github.com/ZheMuxi/HDR-Lift)**（ZheMuxi，GPL-3.0）——WebExtension 骨架、content script 生命周期、WebGPU/WebGL2 降级链、设置面板形态与图标资源都以其为基础
+- **[Headroom HDR / SDR-to-HDR-Video](https://github.com/96dot/SDR-to-HDR-Video)**（MIT）——多 pass 逆色调映射的思路：拷贝 → 亮度金字塔 → 主 pass，局部高光检测、大面积收敛、去色带、锐化
+- **[MacLC](https://www.hazenstudio.com/maclc/)**（Hazen Studio）——`drive = max(Y, 0.85·max(R,G,B))` 的驱动能量公式、以 SDR 白倍数表示峰值、软肩滚降的思路
+- **[W3C ColorWeb-CG](https://github.com/w3c-cg/ColorWeb-CG)** 与 Chromium 的 `CanvasHDR` / WebGPU `toneMapping: 'extended'`——`rec2100-pq`、`display-p3` 与扩展范围画布的色彩语义
+- **[ITU-R BT.2390](https://www.itu.int/pub/R-REP-BT.2390)**——EETF 的色调映射思想，本项目的软肩曲线是它的一个简化实现
+
+软肩曲线本身（指数形式、膝点导数为 1、渐近封顶）是这个项目里独立实现的，没有直接照搬上述代码。
 
 ## 已知限制
 
