@@ -69,6 +69,10 @@ bash scripts/install-app.sh     # 装到 ~/Applications 并重新注册
 | B 站 | 处理普通投稿；按画质标签识别 HDR/杜比并跳过；番剧/影视 DRM 直接跳过 |
 | YouTube | 处理 SDR；只要有 HDR 版本就跳过（读播放器 `adaptiveFormats` 的 BT.2020 / PQ / HLG） |
 | 其他任意站点 | 通用 `<video>` 接管，按 URL 与 `hdrMetadataType` 做基本判断 |
+
+> Safari 上 YouTube 的 HDR 自动识别**不可用**：Safari 不支持 manifest 的 `world: "MAIN"`，
+> 内容脚本读不到页面里的播放器数据。在 Safari 看 YouTube 的 HDR 视频时，请按 `Option+H`
+> 手动把「启用」切到「关闭」，否则画面会被重复抬亮。B 站与 DRM 列表不受影响。
 | Netflix / Disney+ / Prime / Apple TV+ / Max / Hulu / 爱奇艺 / 腾讯视频 / 优酷 / 芒果 / 抖音 等 | 视为 DRM，直接跳过，不尝试读帧 |
 
 YouTube 的 HDR 判断需要读播放器数据，而内容脚本运行在隔离世界读不到页面全局，所以有一个**只在 `youtube.com` 运行的 MAIN world 小脚本**（`yt-main.js`），把结论写进 `data-metalhdr-yt-hdr` 属性供主脚本读取。油猴版直接在页面世界执行，不需要这一步。
@@ -183,6 +187,7 @@ f(x) = x                                              , x ≤ k
 - **站点全屏的是 `<video>` 本身**时，覆盖层不在全屏树内：会暂时交还原视频并提示，退出全屏自动恢复。
   B 站/YouTube 全屏的是播放器容器，不受影响
 - 烧录进画面的字幕、logo 会被一起抬亮
+- **Safari + YouTube HDR**：无法自动识别（Safari 不支持 `world: "MAIN"`），需手动关闭增强
 - 高画质在 4K60 下 GPU 压力明显，面板可切「低」
 - **零拷贝（实验，默认关闭）**：Chromium 上单帧可降到 0.1 ms 级。**开启后可能的后果**：
   画面颜色/亮度可能与关闭时不同（两条路径的色彩处理未对齐）、Safari 上可能直接黑屏、部分机型上会闪烁。
