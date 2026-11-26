@@ -56,6 +56,7 @@ input[type=number] {
   color: #8f8f96; font-size: 10px; line-height: 1.6; word-break: break-all; }
 .status b { color: #c8c8cf; font-weight: 600; }
 .hide { display: none !important; }
+.hint { color: #8a8a90; font-size: 10px; line-height: 1.45; margin-top: 5px; }
 .toast { position: fixed; right: 14px; bottom: 122px; z-index: 2147483001;
   background: rgba(18,18,20,.95); color: #e8e8ea; border: 1px solid rgba(255,255,255,.14);
   padding: 9px 12px; border-radius: 10px; font-size: 11px; max-width: 280px; }
@@ -106,6 +107,7 @@ input[type=number] {
           <div class="seg" data-seg="zeroCopy">
             <button data-v="on">开</button><button data-v="off">关</button>
           </div>
+          <div class="hint">实验功能：颜色可能与「关」时不同；Safari 上可能黑屏。异常请切回「关」。</div>
         </div>
 
         <div class="row">
@@ -159,7 +161,12 @@ input[type=number] {
         if (key === "enabled") s.enabled = btn.dataset.v === "on";
         else if (key === "quality") s.quality = btn.dataset.v;
         else if (key === "peakMode") s.peakMode = btn.dataset.v;
-        else if (key === "zeroCopy") s.zeroCopy = btn.dataset.v === "on";
+        else if (key === "zeroCopy") {
+          s.zeroCopy = btn.dataset.v === "on";
+          if (s.zeroCopy) {
+            notice("零拷贝是实验功能：颜色可能偏移，Safari 上可能黑屏。异常请切回「关」。");
+          }
+        }
         api.setSettings(s);
         if (key === "peakMode" && btn.dataset.v === "auto") api.refreshHeadroom();
         sync();
