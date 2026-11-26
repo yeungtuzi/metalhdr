@@ -122,8 +122,8 @@
       this.prev.zIndex = this.video.style.zIndex;
 
       if (isProtected(this.video)) {
+        // 已知限制：DRM 视频读不到帧，直接跳过（不打扰用户）
         this.skipReason = "protected";
-        this.announce("受保护视频（DRM），无法处理");
         return;
       }
       if (isHdrSource(this.video)) {
@@ -161,7 +161,12 @@
       this.installCanvas();
       this.bindMedia();
       this.syncBox(true);
-      this.loop();
+      if (!this.video.paused) this.loop();
+      // 视频可能在我们注册回调之前就已经在播放，rVFC 不再回调 → 保活兜底
+      this.keepAlive = setInterval(() => {
+        if (this.stopped || !this.active || this.video.paused || document.hidden) return;
+        if (performance.now() - (this.lastFrameAt || 0) > 1500) this.restartLoop();
+      }, 1000);
       NS.ui?.sync();
     }
 
@@ -195,10 +200,15 @@
       const sw = this.video.videoWidth || 1;
       const sh = this.video.videoHeight || 1;
 
-      this.canvas.style.left = `${vr.left - pr.left + this.parent.scrollLeft}px`;
-      this.canvas.style.top = `${vr.top - pr.top + this.parent.scrollTop}px`;
-      this.canvas.style.width = `${vr.width}px`;
-      this.canvas.style.height = `${vr.height}px`;
+      // 容器可能被 transform: scale() 缩放（全屏/剧场常见），rect 是变换后的值，
+      // 换回父级局部坐标时要除回缩放比，否则 canvas 会偏移或尺寸不对。
+      const sx = this.parent.offsetWidth ? pr.width / this.parent.offsetWidth : 1;
+      const sy = this.parent.offsetHeight ? pr.height / this.parent.offsetHeight : 1;
+
+      this.canvas.style.left = `${(vr.left - pr.left) / (sx || 1) + this.parent.scrollLeft}px`;
+      this.canvas.style.top = `${(vr.top - pr.top) / (sy || 1) + this.parent.scrollTop}px`;
+      this.canvas.style.width = `${vr.width / (sx || 1)}px`;
+      this.canvas.style.height = `${vr.height / (sy || 1)}px`;
 
       const rw = Math.max(2, Math.round(sw * this.scale));
       const rh = Math.max(2, Math.round(sh * this.scale));
@@ -301,6 +311,7 @@
       this.governor();
 
       this.frames++;
+      this.lastFrameAt = performance.now();
       const now = performance.now();
       if (now - this.lastFpsAt >= 1000) {
         this.fps = Math.round((this.frames * 1000) / (now - this.lastFpsAt));
@@ -388,6 +399,8 @@
       }
       if (this.rafId !== null) cancelAnimationFrame(this.rafId);
       this.ro?.disconnect();
+      clearInterval(this.keepAlive);
+      this.keepAlive = null;
       this.unbindMedia();
       window.removeEventListener("fullscreenchange", this.onViewportBound, true);
       window.removeEventListener("resize", this.onViewportBound, true);
@@ -402,7 +415,18 @@
   }
 
   // ── 扫描与生命周期 ────────────────────────────────────────────────
+  const videoIsFullscreen = () => document.fullscreenElement?.tagName === "VIDEO";
+
   const rescan = () => {
+    if (videoIsFullscreen()) {
+      // 全屏树里只有 <video>，兄弟节点不会渲染 —— 只能暂时交还原视频
+      if (state.controller) {
+        state.controller.destroy();
+        state.controller = null;
+        NS.ui?.notice("该站点全屏的是 <video> 本身，全屏期间暂停增强");
+      }
+      return;
+    }
     if (!state.settings.enabled) {
       state.controller?.destroy();
       state.controller = null;
@@ -482,7 +506,10 @@
 
     window.addEventListener("keydown", onKey, true);
     window.addEventListener("resize", rescan, { passive: true });
-    window.addEventListener("fullscreenchange", rescan, { passive: true });
+    window.addEventListener("fullscreenchange", () => {
+      state.controller?.syncBox?.(true);
+      rescan();
+    }, { passive: true });
     document.addEventListener("visibilitychange", () => {
       if (!document.hidden) {
         refreshHeadroom();

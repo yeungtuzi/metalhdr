@@ -1,0 +1,15 @@
+<!doctype html><meta charset=utf-8><title>bare-video fullscreen</title>
+<style>html,body{margin:0;background:#111;color:#eee;font:14px system-ui}
+.wrap{width:900px;margin:20px auto}
+video{width:900px;height:506px;background:#000;display:block}
+button{margin:10px 0;padding:8px 14px;font-size:14px}
+</style>
+<div class="wrap">
+  <button id="fs">全屏 <video> 本身</button>
+  <video src="test.mp4" autoplay loop muted playsinline></video>
+</div>
+<script>
+  document.getElementById('fs').addEventListener('click', () => {
+    document.querySelector('video').requestFullscreen();
+  });
+</script>

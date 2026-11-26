@@ -251,7 +251,8 @@ input[type=number] {
   const notice = (msg) => {
     if (!root) return;
     root.querySelector(".toast")?.remove();
-    const t = h(`<div class="toast">${msg}</div>`);
+    const t = h(`<div class="toast"></div>`);
+    t.textContent = msg;
     root.appendChild(t);
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => t.remove(), 2600);
