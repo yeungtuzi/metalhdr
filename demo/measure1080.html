@@ -1,0 +1,8 @@
+<!doctype html><meta charset=utf-8><title>1080p measure</title>
+<style>html,body{margin:0;background:#0b0b0d;display:grid;place-items:center;height:100%}video{width:1280px;height:720px;background:#000}</style>
+<video src="test1080.mp4" autoplay loop muted playsinline></video>
+<script>
+  const samples = [];
+  [4000, 9000].forEach((t) => setTimeout(() => samples.push({ tag: t, attr: document.documentElement.dataset.metalhdr || "none" }), t));
+  setTimeout(() => fetch("/report?d=" + encodeURIComponent(JSON.stringify({ which: "1080p", samples }))), 10000);
+</script>

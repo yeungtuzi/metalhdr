@@ -46,7 +46,9 @@ fn hash21(p: vec2f) -> f32 {
 }
 `;
 
-  const UNIFORM = /* wgsl */ `
+  // struct 与 binding 分开：拷贝路径用 texture_2d，零拷贝路径用 texture_external，
+  // 两者不能在同一 module 里抢同一组 binding 索引。
+  const STRUCT_U = /* wgsl */ `
 struct U {
   res: vec2f,
   texel: vec2f,
@@ -67,12 +69,9 @@ struct U {
   pad2: f32,
   pad3: f32,
 };
+`;
 
-struct D {
-  outRes: vec2f,
-  texel: vec2f,
-};
-
+  const MAIN_BINDINGS = /* wgsl */ `
 @group(0) @binding(0) var srcTex: texture_2d<f32>;
 @group(0) @binding(1) var samp: sampler;
 @group(0) @binding(2) var<uniform> U0: U;
@@ -214,8 +213,89 @@ fn fsDown(@builtin(position) pos: vec4f) -> @location(0) vec4f {
 }
 `;
 
-  const WGSL_MAIN = `${UNIFORM}\n${COMMON}\n${HQ}\n${LQ}\n${VS}\n${MAIN}`;
+
+  // ── 零拷贝路径：直接从 texture_external 采样（Safari/Chromium 均支持） ──
+  const EXT_MAIN = /* wgsl */ `
+@group(0) @binding(0) var srcExt: texture_external;
+@group(0) @binding(1) var samp: sampler;
+@group(0) @binding(2) var<uniform> U0: U;
+@group(0) @binding(3) var smallTex: texture_2d<f32>;
+
+fn sampleSrc(uv: vec2f) -> vec3f {
+  return textureSampleBaseClampToEdge(srcExt, samp, uv).rgb;
+}
+
+@fragment
+fn fsMainExt(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let uv = pos.xy / U0.res;
+  var c = sampleSrc(uv);
+
+  if (U0.sharpen > 0.001) {
+    let t = U0.texel;
+    let n = (sampleSrc(uv + vec2f(t.x, 0.0)) + sampleSrc(uv - vec2f(t.x, 0.0))
+           + sampleSrc(uv + vec2f(0.0, t.y)) + sampleSrc(uv - vec2f(0.0, t.y))) * 0.25;
+    c = clamp(c + (c - n) * U0.sharpen, vec3f(0.0), vec3f(1.0));
+  }
+
+  let lin = srgbToLinear(clamp(c, vec3f(0.0), vec3f(1.0)));
+  var outLin: vec3f;
+  if (U0.quality > 0.5) {
+    outLin = highQuality(lin, uv);
+  } else {
+    outLin = lowQuality(lin);
+  }
+
+  var enc = linearToSrgb(toP3(max(outLin, vec3f(0.0))));
+  if (U0.deband > 0.001) {
+    let n1 = hash21(uv * U0.res) - 0.5;
+    let n2 = hash21(uv * U0.res + 37.0) - 0.5;
+    enc = enc + vec3f((n1 + n2) * U0.deband / 255.0);
+  }
+  if (U0.extended < 0.5) {
+    let mx = max(enc.r, max(enc.g, enc.b));
+    if (mx > 1.0) { enc = enc * (0.98 + 0.02 * (1.0 - exp(-(mx - 1.0)))) / mx; }
+  }
+  return vec4f(clamp(enc, vec3f(0.0), vec3f(8.0)), 1.0);
+}
+`;
+
+  const EXT_DOWN = /* wgsl */ `
+struct D { outRes: vec2f, texel: vec2f };
+@group(0) @binding(0) var srcExt: texture_external;
+@group(0) @binding(1) var downSamp: sampler;
+@group(0) @binding(2) var<uniform> D0: D;
+
+@fragment
+fn fsDownExt(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let uv = pos.xy / D0.outRes;
+  let t = D0.texel;
+  let a = textureSampleBaseClampToEdge(srcExt, downSamp, uv + vec2f(-t.x, -t.y)).rgb;
+  let b = textureSampleBaseClampToEdge(srcExt, downSamp, uv + vec2f( t.x, -t.y)).rgb;
+  let c = textureSampleBaseClampToEdge(srcExt, downSamp, uv + vec2f(-t.x,  t.y)).rgb;
+  let d = textureSampleBaseClampToEdge(srcExt, downSamp, uv + vec2f( t.x,  t.y)).rgb;
+  let la = luma709(a); let lb = luma709(b); let lc = luma709(c); let ld = luma709(d);
+  return vec4f(max(max(la, lb), max(lc, ld)), (la + lb + lc + ld) * 0.25, 0.0, 1.0);
+}
+`;
+
+
+  const BLIT = /* wgsl */ `
+@group(0) @binding(0) var blitSrc: texture_2d<f32>;
+@group(0) @binding(1) var blitSamp: sampler;
+
+@fragment
+fn fsBlit(@builtin(position) pos: vec4f) -> @location(0) vec4f {
+  let dim = vec2f(textureDimensions(blitSrc, 0));
+  let uv = pos.xy / dim;
+  return textureSampleLevel(blitSrc, blitSamp, uv, 0.0);
+}
+`;
+
+  const WGSL_MAIN = `${STRUCT_U}\n${MAIN_BINDINGS}\n${COMMON}\n${HQ}\n${LQ}\n${VS}\n${MAIN}`;
   const WGSL_DOWN = `${UNIFORM_DOWN}\n${COMMON}\n${VS}\n${DOWN}`;
+  const WGSL_EXT_MAIN = `${STRUCT_U}\n${COMMON}\n${HQ}\n${LQ}\n${VS}\n${EXT_MAIN}`;
+  const WGSL_EXT_DOWN = `${COMMON}\n${VS}\n${EXT_DOWN}`;
+  const WGSL_BLIT = `${VS}\n${BLIT}`;
 
   // ── WebGL2 回退：单 pass，低画质曲线 + 4 抽头局部高光 ────────────────
   const GLSL_VERT = `#version 300 es
@@ -335,5 +415,5 @@ void main() {
 }
 `;
 
-  NS.shaders = { WGSL_MAIN, WGSL_DOWN, GLSL_VERT, GLSL_FRAG };
+  NS.shaders = { WGSL_MAIN, WGSL_DOWN, WGSL_EXT_MAIN, WGSL_EXT_DOWN, WGSL_BLIT, GLSL_VERT, GLSL_FRAG };
 })();

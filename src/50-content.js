@@ -140,7 +140,7 @@
         try {
           this.canvas = this.makeCanvas();
           const r = new R(this.canvas);
-          await r.init(state.settings.quality);
+          await r.init(state.settings.quality, { zeroCopy: state.settings.zeroCopy });
           r.updateSettings(resolveTone(state.settings, effectivePeak()));
           this.renderer = r;
           break;
@@ -273,11 +273,11 @@
 
     loop = () => {
       if (this.stopped || !this.active) return;
-      const step = () => {
+      const step = (now, meta) => {
         this.cbId = null;
         this.rafId = null;
         if (this.stopped || !this.active) return;
-        this.frame();
+        this.frame(meta);
         this.schedule();
       };
       if ("requestVideoFrameCallback" in this.video) {
@@ -293,8 +293,13 @@
       this.loop();
     }
 
-    frame() {
+    frame(meta) {
       if (!this.renderer || !this.active || document.hidden) return;
+      // Safari 的 rVFC 可能按屏幕刷新率回调；同一帧不再重复渲染
+      if (meta && typeof meta.presentedFrames === "number") {
+        if (meta.presentedFrames === this.lastPresented) return;
+        this.lastPresented = meta.presentedFrames;
+      }
       if (this.video.readyState < 2 || !this.video.videoWidth) return;
       this.syncBox();
       const t0 = performance.now();
@@ -323,7 +328,8 @@
             active: this.active, renderer: this.renderer?.name || "",
             vw: this.video.videoWidth, vh: this.video.videoHeight,
             connected: this.video.isConnected, paused: this.video.paused,
-            rs: this.video.readyState, fps: this.fps, scale: this.scale,
+            rs: this.video.readyState, fps: this.fps, scale: this.scale, zc: Boolean(this.renderer?.useExt),
+            cost: Math.round(this.cost * 10) / 10,
             hid: !!this.hidVideo, videos: document.querySelectorAll("video").length
           });
         } catch { /* ignore */ }
@@ -387,6 +393,7 @@
         sourceW: this.video.videoWidth || 0,
         sourceH: this.video.videoHeight || 0,
         scale: this.scale,
+        zeroCopy: Boolean(this.renderer?.useExt),
         cost: Math.round(this.cost * 10) / 10
       };
     }
@@ -445,7 +452,15 @@
   };
 
   const applySettings = async (next) => {
+    const prev = state.settings;
     state.settings = save(normalize(next));
+    if (prev.zeroCopy !== state.settings.zeroCopy) {
+      state.controller?.destroy();
+      state.controller = null;
+      rescan();
+      NS.ui?.sync();
+      return;
+    }
     NS.ui?.sync();
     if (!state.settings.enabled) {
       state.controller?.destroy();

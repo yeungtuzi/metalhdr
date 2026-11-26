@@ -92,6 +92,8 @@ bash scripts/install-app.sh     # 装到 ~/Applications 并重新注册
   B 站/YouTube 全屏的是播放器容器，不受影响
 - 烧录进画面的字幕、logo 会被一起抬亮
 - 高画质在 4K60 下 GPU 压力明显，面板可切「低」
+- **零拷贝（实验）**：面板里可开。Chromium 上单帧可降到 0.1 ms 级，但两条路径的**颜色一致性尚未验证**；
+  Safari 上外部纹理时好时坏（实测会采到全黑），默认关闭
 
 ## 已验证
 
@@ -100,6 +102,7 @@ bash scripts/install-app.sh     # 装到 ~/Applications 并重新注册
 | Safari 27.2 + 油猴脚本 | 测试条正常输出；B 站画面变亮；原生全屏增强保持 |
 | Chromium（Brave 158）扩展 | B 站接管成功，100 fps；网页全屏/原生全屏 canvas 与视频 rect 一致 |
 | 裸 `<video>` 全屏 | 自动交还原视频并提示，退出后恢复增强 |
+| 4K 25fps（Safari，拷贝路径） | 19.7 ms/帧，预算 40 ms，不掉帧 |
 
 ## 开发
 

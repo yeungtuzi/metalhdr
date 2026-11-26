@@ -3,7 +3,7 @@
   "use strict";
 
   const NS = (globalThis.MetalHDR = globalThis.MetalHDR || {});
-  const { WGSL_MAIN, WGSL_DOWN, GLSL_VERT, GLSL_FRAG } = NS.shaders;
+  const { WGSL_MAIN, WGSL_DOWN, WGSL_EXT_MAIN, WGSL_EXT_DOWN, WGSL_BLIT, GLSL_VERT, GLSL_FRAG } = NS.shaders;
 
   const FMT = "rgba16float";
   const U_FLOATS = 20;
@@ -39,8 +39,9 @@
       return Boolean(navigator.gpu);
     }
 
-    async init(quality) {
+    async init(quality, options = {}) {
       this.quality = quality;
+      this.allowExt = options.zeroCopy === true;
       const adapter = await navigator.gpu.requestAdapter({ powerPreference: "high-performance" });
       if (!adapter) throw new Error("no WebGPU adapter");
       this.device = await adapter.requestDevice();
@@ -81,6 +82,39 @@
         vertex: { module: mainModule, entryPoint: "vs" },
         fragment: { module: mainModule, entryPoint: "fsMain", targets: [{ format: this.format }] }
       });
+
+      this.extPipelines = null;
+      if (this.allowExt && typeof this.device.importExternalTexture === "function") {
+        try {
+          const em = this.device.createShaderModule({ code: WGSL_EXT_MAIN });
+          const ed = this.device.createShaderModule({ code: WGSL_EXT_DOWN });
+          this.extPipelines = {
+            main: this.device.createRenderPipeline({
+              layout: "auto",
+              vertex: { module: em, entryPoint: "vs" },
+              fragment: { module: em, entryPoint: "fsMainExt", targets: [{ format: FMT }] }
+            }),
+            down: this.device.createRenderPipeline({
+              layout: "auto",
+              vertex: { module: ed, entryPoint: "vs" },
+              fragment: { module: ed, entryPoint: "fsDownExt", targets: [{ format: FMT }] }
+            })
+          };
+          const bm = this.device.createShaderModule({ code: WGSL_BLIT });
+          this.extPipelines.blit = this.device.createRenderPipeline({
+            layout: "auto",
+            vertex: { module: bm, entryPoint: "vs" },
+            fragment: { module: bm, entryPoint: "fsBlit", targets: [{ format: this.format }] }
+          });
+          this.extDownUniform = this.device.createBuffer({
+            size: D_FLOATS * 4,
+            usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+          });
+        } catch (e) {
+          this.extPipelines = null;
+        }
+      }
+      this.useExt = this.allowExt && Boolean(this.extPipelines);
 
       this.downPipeline = this.device.createRenderPipeline({
         layout: "auto",
@@ -133,6 +167,36 @@
       this.destroyTextures();
       this.srcW = Math.max(1, w);
       this.srcH = Math.max(1, h);
+
+      // 高光图只在零拷贝路径使用；拷贝路径没有 extPipelines，不能碰
+      if (this.useExt) {
+        this.smallW = Math.max(2, this.srcW >> 3);
+        this.smallH = Math.max(2, this.srcH >> 3);
+        this.tex.small = mk(this.smallW, this.smallH, GPUTextureUsage.RENDER_ATTACHMENT);
+        this.dData[0] = this.smallW;
+        this.dData[1] = this.smallH;
+        this.dData[2] = 1 / this.smallW;
+        this.dData[3] = 1 / this.smallH;
+        this.device.queue.writeBuffer(this.extDownUniform, 0, this.dData);
+        this.bind.extDown = this.device.createBindGroup({
+          layout: this.extPipelines.down.getBindGroupLayout(0),
+          entries: [
+            { binding: 1, resource: this.sampler },
+            { binding: 2, resource: { buffer: this.extDownUniform } }
+          ]
+        });
+        this.bind.extMain = null;
+        this.tex.off = mk(this.outW, this.outH, GPUTextureUsage.RENDER_ATTACHMENT);
+        this.bind.blit = this.device.createBindGroup({
+          layout: this.extPipelines.blit.getBindGroupLayout(0),
+          entries: [
+            { binding: 0, resource: this.tex.off.createView() },
+            { binding: 1, resource: this.sampler }
+          ]
+        });
+        return;
+      }
+
       this.tex.src = mk(this.srcW, this.srcH, GPUTextureUsage.RENDER_ATTACHMENT);
 
       this.tex.mips = [];
@@ -170,6 +234,8 @@
 
     destroyTextures() {
       if (this.tex.src) this.tex.src.destroy();
+      if (this.tex.small) this.tex.small.destroy();
+      if (this.tex.off) this.tex.off.destroy();
       (this.tex.mips || []).forEach((t) => t.destroy());
       this.tex = {};
       this.bind = {};
@@ -228,15 +294,88 @@
         this.allocSource(video.videoWidth, video.videoHeight);
         this.bind.main = null;
       }
-      if (!this.tex.src) return;
       this.writeUniforms();
+      const enc = this.device.createCommandEncoder();
+
+      if (this.useExt) {
+        let extTexture = null;
+        try {
+          extTexture = this.device.importExternalTexture({ source: video });
+        } catch {
+          this.useExt = false;
+          this.tex.small?.destroy();
+          this.tex.small = null;
+          this.allocSource(video.videoWidth, video.videoHeight);
+        }
+
+        if (extTexture) {
+          // 高光图：直接从视频纹理降采样，省掉全帧拷贝
+          if (this.quality === "high") {
+            const downBg = this.device.createBindGroup({
+              layout: this.extPipelines.down.getBindGroupLayout(0),
+              entries: [
+                { binding: 0, resource: extTexture },
+                { binding: 1, resource: this.sampler },
+                { binding: 2, resource: { buffer: this.extDownUniform } }
+              ]
+            });
+            const dp = enc.beginRenderPass({
+              colorAttachments: [{
+                view: this.tex.small.createView(),
+                loadOp: "clear", storeOp: "store",
+                clearValue: { r: 0, g: 0, b: 0, a: 1 }
+              }]
+            });
+            dp.setPipeline(this.extPipelines.down);
+            dp.setBindGroup(0, downBg);
+            dp.draw(3);
+            dp.end();
+          }
+
+          const small = this.quality === "high" ? this.tex.small.createView() : this.dummy.createView();
+          const bg = this.device.createBindGroup({
+            layout: this.extPipelines.main.getBindGroupLayout(0),
+            entries: [
+              { binding: 0, resource: extTexture },
+              { binding: 1, resource: this.sampler },
+              { binding: 2, resource: { buffer: this.uniform } },
+              { binding: 3, resource: small }
+            ]
+          });
+          const mid = enc.beginRenderPass({
+            colorAttachments: [{
+              view: this.tex.off.createView(),
+              loadOp: "clear", storeOp: "store",
+              clearValue: { r: 0, g: 0, b: 0, a: 1 }
+            }]
+          });
+          mid.setPipeline(this.extPipelines.main);
+          mid.setBindGroup(0, bg);
+          mid.draw(3);
+          mid.end();
+
+          const blit = enc.beginRenderPass({
+            colorAttachments: [{
+              view: this.ctx.getCurrentTexture().createView(),
+              loadOp: "clear", storeOp: "store",
+              clearValue: { r: 0, g: 0, b: 0, a: 1 }
+            }]
+          });
+          blit.setPipeline(this.extPipelines.blit);
+          blit.setBindGroup(0, this.bind.blit);
+          blit.draw(3);
+          blit.end();
+          this.device.queue.submit([enc.finish()]);
+          return;
+        }
+      }
+
+      if (!this.tex.src) return;
       this.device.queue.copyExternalImageToTexture(
         { source: video },
         { texture: this.tex.src },
         [this.srcW, this.srcH, 1]
       );
-
-      const enc = this.device.createCommandEncoder();
 
       if (this.quality === "high") {
         for (let i = 0; i < this.tex.mips.length; i++) {

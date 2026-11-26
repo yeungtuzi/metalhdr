@@ -1,0 +1,86 @@
+<!doctype html><meta charset=utf-8><title>ext2</title>
+<script>try { localStorage.setItem("metalhdr:settings", JSON.stringify({ enabled: false })); } catch {}</script>
+<video id="v" src="test.mp4" autoplay loop muted playsinline style="width:320px"></video>
+<script src="../dist/metalhdr.user.js"></script>
+<script type="module">
+const out = { ua: navigator.userAgent.slice(0, 50) };
+const f16 = (u) => { const s=(u&0x8000)>>15,e=(u&0x7c00)>>10,f=u&0x3ff;
+  if(e===0) return (s?-1:1)*Math.pow(2,-14)*(f/1024);
+  if(e===31) return f?NaN:(s?-Infinity:Infinity);
+  return (s?-1:1)*Math.pow(2,e-15)*(1+f/1024); };
+
+try {
+  const sh = MetalHDR.shaders;
+  const W = 1280, H = 720, SW = 160, SH = 90;
+  const adapter = await navigator.gpu.requestAdapter();
+  const dev = await adapter.requestDevice();
+  const v = document.getElementById("v");
+  await v.play().catch(() => {});
+  await new Promise((r) => setTimeout(r, 1200));
+
+  // 1) 编译信息
+  for (const [name, code] of [["extMain", sh.WGSL_EXT_MAIN], ["extDown", sh.WGSL_EXT_DOWN]]) {
+    const m = dev.createShaderModule({ code });
+    const info = await m.getCompilationInfo();
+    out[name + "Msgs"] = info.messages.map((x) => `${x.type}@${x.lineNum}: ${x.message.slice(0, 90)}`).slice(0, 3);
+  }
+
+  const uniform = dev.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  const u = new Float32Array(20);
+  u.set([W, H, 1 / W, 1 / H, 4, 0.62, 0.52, 0.5, 0.16, 0, 0.6, 0.7, 1, 1.22, 1, 1]);
+  dev.queue.writeBuffer(uniform, 0, u);
+
+  const downU = dev.createBuffer({ size: 16, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+  dev.queue.writeBuffer(downU, 0, new Float32Array([SW, SH, 1 / SW, 1 / SH]));
+
+  const small = dev.createTexture({ size: [SW, SH, 1], format: "rgba16float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.TEXTURE_BINDING });
+  const dst = dev.createTexture({ size: [W, H, 1], format: "rgba16float",
+    usage: GPUTextureUsage.RENDER_ATTACHMENT | GPUTextureUsage.COPY_SRC });
+
+  const sampler = dev.createSampler({ magFilter: "linear", minFilter: "linear" });
+  const ext = dev.importExternalTexture({ source: v });
+
+  const md = dev.createShaderModule({ code: sh.WGSL_EXT_DOWN });
+  const mm = dev.createShaderModule({ code: sh.WGSL_EXT_MAIN });
+  let downPipe, mainPipe;
+  try {
+    downPipe = dev.createRenderPipeline({ layout: "auto",
+      vertex: { module: md, entryPoint: "vs" },
+      fragment: { module: md, entryPoint: "fsDownExt", targets: [{ format: "rgba16float" }] } });
+    out.downPipe = "ok";
+  } catch (e) { out.downPipe = "throw: " + e.message.slice(0, 100); }
+  try {
+    mainPipe = dev.createRenderPipeline({ layout: "auto",
+      vertex: { module: mm, entryPoint: "vs" },
+      fragment: { module: mm, entryPoint: "fsMainExt", targets: [{ format: "rgba16float" }] } });
+    out.mainPipe = "ok";
+  } catch (e) { out.mainPipe = "throw: " + e.message.slice(0, 100); }
+
+  if (downPipe && mainPipe) {
+    const enc = dev.createCommandEncoder();
+    const db = dev.createBindGroup({ layout: downPipe.getBindGroupLayout(0), entries: [
+      { binding: 0, resource: ext }, { binding: 1, resource: sampler },
+      { binding: 2, resource: { buffer: downU } } ] });
+    let p = enc.beginRenderPass({ colorAttachments: [{ view: small.createView(), loadOp: "clear", storeOp: "store", clearValue: { r:0,g:0,b:0,a:1 } }] });
+    p.setPipeline(downPipe); p.setBindGroup(0, db); p.draw(3); p.end();
+
+    const mb = dev.createBindGroup({ layout: mainPipe.getBindGroupLayout(0), entries: [
+      { binding: 0, resource: ext }, { binding: 1, resource: sampler },
+      { binding: 2, resource: { buffer: uniform } }, { binding: 3, resource: small.createView() } ] });
+    p = enc.beginRenderPass({ colorAttachments: [{ view: dst.createView(), loadOp: "clear", storeOp: "store", clearValue: { r:0,g:0,b:0,a:1 } }] });
+    p.setPipeline(mainPipe); p.setBindGroup(0, mb); p.draw(3); p.end();
+
+    const buf = dev.createBuffer({ size: 64 * 64 * 8, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
+    enc.copyTextureToBuffer({ texture: dst }, { buffer: buf, bytesPerRow: 512 }, [64, 64, 1]);
+    dev.queue.submit([enc.finish()]);
+    await buf.mapAsync(GPUMapMode.READ);
+    const u16 = new Uint16Array(buf.getMappedRange());
+    let sum = 0, mx = 0;
+    for (let i = 0; i < u16.length; i += 4) { const l = f16(u16[i]) + f16(u16[i+1]) + f16(u16[i+2]); sum += l; mx = Math.max(mx, l); }
+    out.mean = +(sum / (64 * 64 * 3)).toFixed(4);
+    out.max = +mx.toFixed(3);
+  }
+} catch (e) { out.fatal = e.message.slice(0, 140); }
+fetch("/report?d=" + encodeURIComponent(JSON.stringify(out)));
+</script>

@@ -102,6 +102,13 @@ input[type=number] {
         </div>
 
         <div class="row">
+          <div class="lbl">零拷贝 <span style="color:#6b6b73">省一次全帧拷贝</span></div>
+          <div class="seg" data-seg="zeroCopy">
+            <button data-v="on">开</button><button data-v="off">关</button>
+          </div>
+        </div>
+
+        <div class="row">
           <div class="lbl">最高亮度</div>
           <div class="seg" data-seg="peakMode">
             <button data-v="auto">自动（系统）</button><button data-v="manual">手动</button>
@@ -152,6 +159,7 @@ input[type=number] {
         if (key === "enabled") s.enabled = btn.dataset.v === "on";
         else if (key === "quality") s.quality = btn.dataset.v;
         else if (key === "peakMode") s.peakMode = btn.dataset.v;
+        else if (key === "zeroCopy") s.zeroCopy = btn.dataset.v === "on";
         api.setSettings(s);
         if (key === "peakMode" && btn.dataset.v === "auto") api.refreshHeadroom();
         sync();
@@ -202,6 +210,9 @@ input[type=number] {
     els.panel.querySelector('[data-seg="peakMode"]').querySelectorAll("button").forEach((b) =>
       b.classList.toggle("on", b.dataset.v === s.peakMode)
     );
+    els.panel.querySelector('[data-seg="zeroCopy"]').querySelectorAll("button").forEach((b) =>
+      b.classList.toggle("on", (b.dataset.v === "on") === Boolean(s.zeroCopy))
+    );
 
     const autoRow = els.panel.querySelector("[data-auto]");
     const manRow = els.panel.querySelector("[data-manual]");
@@ -236,7 +247,9 @@ input[type=number] {
     const src = { system: "系统读取", manual: "手动", fallback: "兜底" }[st.headroom?.source] || "—";
     const parts = [
       `<b>${st.renderer || "—"}</b> · ${st.sourceW || 0}×${st.sourceH || 0}`,
-      st.active ? `${st.fps || 0} fps · ${st.cost || 0} ms · scale ${st.scale || 1}` : `未处理${st.skipReason ? " · " + st.skipReason : ""}`,
+      st.active
+        ? `${st.fps || 0} fps · ${st.cost || 0} ms · scale ${st.scale || 1} · 零拷贝 ${st.zeroCopy ? "开" : "关"}`
+        : `未处理${st.skipReason ? " · " + st.skipReason : ""}`,
       `峰值 <b>${Math.round(peak)}</b> nits（${src}）`,
       st.headroom?.screen ? `屏幕 ${st.headroom.screen}` : ""
     ].filter(Boolean);

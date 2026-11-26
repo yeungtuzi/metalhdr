@@ -1,0 +1,16 @@
+<!doctype html><meta charset=utf-8><title>MetalHDR measure</title>
+<style>html,body{margin:0;background:#0b0b0d;display:grid;place-items:center;height:100%}video{width:960px;height:540px;background:#000}</style>
+<video src="test.mp4" autoplay loop muted playsinline></video>
+<script>
+  const samples = [];
+  const take = (tag) => samples.push({
+    tag,
+    attr: document.documentElement.dataset.metalhdr || "none",
+    canvas: !!document.querySelector("canvas.metalhdr-canvas"),
+    host: !!document.getElementById("metalhdr-root")
+  });
+  [4000, 8000, 12000].forEach((t) => setTimeout(() => take("t" + t / 1000), t));
+  setTimeout(() => {
+    fetch("/report?d=" + encodeURIComponent(JSON.stringify({ ua: navigator.userAgent.slice(0, 90), samples })));
+  }, 13000);
+</script>

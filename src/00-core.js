@@ -23,6 +23,7 @@
     deband: 0.6,
     protect: 0.7,           // 肤色保护
     autoEnableSites: true,
+    zeroCopy: false,      // 零拷贝在 Safari 上会黑屏（仅 Chromium 可用），默认关
     shortcut: "Alt+H",
     debug: false
   });
@@ -48,6 +49,7 @@
     sharpen: clamp(num(s.sharpen, DEFAULT_SETTINGS.sharpen), 0, 1),
     deband: clamp(num(s.deband, DEFAULT_SETTINGS.deband), 0, 1),
     protect: clamp(num(s.protect, DEFAULT_SETTINGS.protect), 0, 1),
+    zeroCopy: Boolean(s.zeroCopy ?? DEFAULT_SETTINGS.zeroCopy),
     shortcut: String(s.shortcut ?? DEFAULT_SETTINGS.shortcut).trim(),
     debug: Boolean(s.debug ?? DEFAULT_SETTINGS.debug)
   });
@@ -109,8 +111,15 @@
     const wantCtrl = parts.includes("Ctrl");
     const wantMeta = parts.includes("Meta");
     const eventKey = event.key.length === 1 ? event.key.toUpperCase() : event.key;
+    const want = key.length === 1 ? key.toUpperCase() : key;
+    // macOS 上 Option+H 会变成特殊字符（˙），必须按物理键位匹配
+    const byCode =
+      /^[A-Z]$/.test(want) ? event.code === "Key" + want
+      : /^[0-9]$/.test(want) ? event.code === "Digit" + want
+      : want === "Space" ? event.code === "Space"
+      : false;
     return (
-      eventKey === (key.length === 1 ? key.toUpperCase() : key) &&
+      (eventKey === want || byCode) &&
       event.altKey === wantAlt &&
       event.shiftKey === wantShift &&
       event.ctrlKey === wantCtrl &&
