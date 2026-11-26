@@ -55,6 +55,7 @@ bash native/install.sh
 node scripts/build.mjs
 bash scripts/make-safari.sh     # 生成 Xcode 工程
 bash scripts/run-safari.sh      # 无账号：ad-hoc 签名构建 + 注册 + 启动
+bash scripts/install-app.sh     # 装到 ~/Applications 并重新注册
 ```
 
 然后 **Safari › 设置 › 扩展** 勾选 MetalHDR。若从 Xcode 直接 Run，需要先在 Safari 的「开发」菜单里允许未签名扩展。
