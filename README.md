@@ -107,6 +107,8 @@ YouTube 的 HDR 判断需要读播放器数据，而内容脚本运行在隔离�
 
 峰值统一用「SDR 白的倍数」表示：`peak = 峰值 nits / 100`。macOS 上 EDR 的 1.0 对应约 100 nit 参考白，所以 964 nits 的屏幕就是 `peak ≈ 9.6`。
 
+画布标 `display-p3` 而不是 `rec2100-pq`，是因为 WebGPU 画布的 `colorSpace` 只接受 `srgb` / `display-p3` / `srgb-linear`（实测 `rec2100-pq` 直接抛错），而 P3 只是容器标记——macOS 合成器会按显示器实际 profile（HDR 屏通常是 BT.2020）做转换，并把 >1.0 的部分作为 EDR 亮度保留，源是 BT.709 本就落在 P3 之内，因此不损失色域。
+
 ### 2. 只动亮部：驱动能量
 
 逐像素算一个「有多亮」的标量，而不是直接对 RGB 三个通道分别处理——这样色相不会偏：
